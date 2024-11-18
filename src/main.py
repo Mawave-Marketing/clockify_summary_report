@@ -73,7 +73,8 @@ def process_clockify_data(tmp_dir):
     all_data = []
     for file, file_date in csv_files:
         df = pd.read_csv(file, sep=',', encoding='utf-8')
-        df['date'] = (file_date.date() - date(1970, 1, 1)).days
+        # Store the actual date instead of days since epoch
+        df['date'] = file_date.date()
         all_data.append(df)
     
     if not all_data:
@@ -91,9 +92,9 @@ def process_clockify_data(tmp_dir):
     }
     combined_df.rename(columns=column_mapping, inplace=True)
     
+    # Convert numeric columns
     combined_df['time_decimal'] = pd.to_numeric(combined_df['time_decimal'], errors='coerce')
     combined_df['amount_eur'] = pd.to_numeric(combined_df['amount_eur'], errors='coerce')
-    combined_df['date'] = combined_df['date'].astype(int)
     
     return combined_df
 
@@ -149,7 +150,7 @@ def main(request):
                 bigquery.SchemaField("time_hours", "STRING"),
                 bigquery.SchemaField("time_decimal", "FLOAT"),
                 bigquery.SchemaField("amount_eur", "FLOAT"),
-                bigquery.SchemaField("date", "INTEGER"),
+                bigquery.SchemaField("date", "DATE"),  # Changed to DATE type
             ]
         )
         
@@ -159,24 +160,6 @@ def main(request):
         )
         load_job.result()
         logging.info("BigQuery load completed")
-        
-        # Convert date format
-        query = f"""
-        CREATE OR REPLACE TABLE `{PROJECT_ID}.dl_clockify.summary_time_entry_report` AS
-        SELECT
-            user,
-            project,
-            client,
-            time_hours,
-            time_decimal,
-            amount_eur,
-            DATE_ADD('1970-01-01', INTERVAL date DAY) AS date
-        FROM `{PROJECT_ID}.dl_clockify.summary_time_entry_report`
-        """
-        
-        query_job = client.query(query)
-        query_job.result()
-        logging.info("Date conversion completed")
         
         end_time = datetime.now()
         duration = end_time - start_time
