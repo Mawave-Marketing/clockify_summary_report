@@ -10,6 +10,7 @@ import csv
 import re
 from google.cloud import storage
 from google.cloud import bigquery
+from flask import jsonify
 
 # Configuration from environment variables
 API_KEY = os.environ.get('CLOCKIFY_API_KEY')
@@ -27,6 +28,7 @@ headers = {
     'Content-Type': 'application/json'
 }
 
+# [Previous helper functions remain the same]
 def clean_column_name(name):
     cleaned = re.sub(r'[^\w\s]', '', name)
     cleaned = re.sub(r'\s+', '_', cleaned).lower()
@@ -89,6 +91,9 @@ def process_clockify_data(tmp_dir):
         df['date'] = days_since_epoch(file_date.date())
         all_data.append(df)
     
+    if not all_data:
+        return None
+        
     combined_df = pd.concat(all_data, ignore_index=True)
     
     column_mapping = {
@@ -109,12 +114,26 @@ def process_clockify_data(tmp_dir):
 
 @functions_framework.http
 def main(request):
+    """HTTP Cloud Function.
+    Args:
+        request (flask.Request): The request object.
+    Returns:
+        The response text, or any set of values that can be turned into a
+        Response object using `make_response`
+    """
     try:
+        # Check if this is a health check request
+        if request.method == 'GET':
+            return jsonify({'status': 'healthy'}), 200
+
         # Create temporary directory
         tmp_dir = tempfile.mkdtemp()
         
         # Process the data
         df = process_clockify_data(tmp_dir)
+        
+        if df is None:
+            return jsonify({'error': 'No data processed'}), 400
         
         # Save to parquet
         parquet_file = os.path.join(tmp_dir, "combined_clockify_report.parquet")
@@ -170,8 +189,8 @@ def main(request):
         query_job = client.query(query)
         query_job.result()
         
-        return 'Data processing completed successfully', 200
+        return jsonify({'status': 'success', 'message': 'Data processing completed successfully'}), 200
         
     except Exception as e:
         print(f"Error: {str(e)}")
-        return f'Error: {str(e)}', 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
