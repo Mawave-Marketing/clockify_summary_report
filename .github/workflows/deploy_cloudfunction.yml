@@ -25,7 +25,7 @@ jobs:
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       timeout-minutes: 10
       with:
-        name: 'clockify-to-bigquery'  # Changed function name
+        name: 'clockify-to-bigquery'
         region: 'europe-west3'
         source_dir: './src/'
         runtime: 'python310'
@@ -39,6 +39,6 @@ jobs:
           GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
         max_instance_count: 1
         max_instance_request_concurrency: 1
-        ingress_settings: 'ALLOW_ALL'  # Allowing Cloud Scheduler access
-        timeout: '540s'  # Adding timeout of 9 minutes since the function might run longer
+        ingress_settings: 'ALLOW_ALL'
+        service_timeout: '540s'  # Changed from 'timeout' to 'service_timeout'
         service_account: '${{ secrets.RUNTIME_SERVICE_ACCOUNT_EMAIL }}'
