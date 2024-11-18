@@ -1,10 +1,8 @@
 name: deploy cloud function
-
 on: 
   push:
     branches:
       - main
-
 jobs:
   deploy:
     permissions:
@@ -12,15 +10,12 @@ jobs:
       id-token: 'write'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
     - uses: 'actions/checkout@v4'
-
     - id: 'auth'
       uses: 'google-github-actions/auth@v2'
       with:
         credentials_json: '${{ secrets.DEPLOYER_SERVICE_ACCOUNT }}'
-
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       timeout-minutes: 10
@@ -37,8 +32,8 @@ jobs:
           CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
           GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
           GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
+          GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ secrets.RUNTIME_SERVICE_ACCOUNT }}
         max_instance_count: 1
         max_instance_request_concurrency: 1
         ingress_settings: 'ALLOW_ALL'
-        service_timeout: '540s'  # Changed from 'timeout' to 'service_timeout'
         service_account: '${{ secrets.RUNTIME_SERVICE_ACCOUNT_EMAIL }}'
