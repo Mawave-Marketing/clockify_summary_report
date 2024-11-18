@@ -1,5 +1,4 @@
 import functions_framework
-import requests
 import json
 import pandas as pd
 import os
@@ -10,7 +9,14 @@ import csv
 import re
 from google.cloud import storage
 from google.cloud import bigquery
-from flask import jsonify
+import requests
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Configuration from environment variables
 API_KEY = os.environ.get('CLOCKIFY_API_KEY')
@@ -19,30 +25,8 @@ PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME')
 BASE_URL = f'https://reports.api.clockify.me/v1/workspaces/{WORKSPACE_ID}/reports/summary'
 
-# Add some validation to ensure environment variables are set
-if not all([API_KEY, WORKSPACE_ID, PROJECT_ID, BUCKET_NAME]):
-    raise ValueError("Missing required environment variables. Please ensure all required environment variables are set.")
-
-headers = {
-    'X-Api-Key': API_KEY,
-    'Content-Type': 'application/json'
-}
-
-# [Previous helper functions remain the same]
-def clean_column_name(name):
-    cleaned = re.sub(r'[^\w\s]', '', name)
-    cleaned = re.sub(r'\s+', '_', cleaned).lower()
-    return cleaned
-
-def detect_delimiter(file_path):
-    with open(file_path, 'r', newline='') as csvfile:
-        dialect = csv.Sniffer().sniff(csvfile.read(1024))
-        return dialect.delimiter
-
-def days_since_epoch(d):
-    return (d - date(1970, 1, 1)).days
-
 def request_summary_report(start_date, end_date, output_dir):
+    """Request Clockify report for a date range"""
     payload = {
         "amountShown": "EARNED",
         "dateRangeStart": start_date.isoformat() + "Z",
@@ -53,42 +37,43 @@ def request_summary_report(start_date, end_date, output_dir):
             "groups": ["USER", "PROJECT"]
         }
     }
+    headers = {
+        'X-Api-Key': API_KEY,
+        'Content-Type': 'application/json'
+    }
+    
     response = requests.post(BASE_URL, headers=headers, data=json.dumps(payload))
-
+    
     if response.status_code == 200:
         filename = f"clockify_summary_report_{start_date.strftime('%Y-%m-%d')}.csv"
         filepath = os.path.join(output_dir, filename)
         with open(filepath, "wb") as file:
             file.write(response.content)
-        print(f"Report downloaded successfully for {start_date.strftime('%Y-%m-%d')} as {filename}")
+        logging.info(f"Report downloaded successfully for {start_date.strftime('%Y-%m-%d')}")
         return filepath
     else:
-        print(f"Failed to retrieve report for {start_date.strftime('%Y-%m-%d')}: {response.status_code}, {response.text}")
+        logging.error(f"Failed to retrieve report: {response.status_code}, {response.text}")
         return None
 
 def process_clockify_data(tmp_dir):
+    """Process Clockify data and return DataFrame"""
     start_date = datetime(2024, 1, 1)
     end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     csv_files = []
-
-    # Download CSV reports
+    
     current_date = start_date
     while current_date < end_date:
         next_day = current_date + timedelta(days=1)
-        if current_date < next_day:
-            csv_file = request_summary_report(current_date, next_day, tmp_dir)
-            if csv_file:
-                csv_files.append((csv_file, current_date))
+        csv_file = request_summary_report(current_date, next_day, tmp_dir)
+        if csv_file:
+            csv_files.append((csv_file, current_date))
         current_date = next_day
         time.sleep(2)
-
-    # Concatenate CSV files
+    
     all_data = []
     for file, file_date in csv_files:
-        delimiter = detect_delimiter(file)
-        df = pd.read_csv(file, sep=delimiter, encoding='utf-8')
-        df.columns = [clean_column_name(col) for col in df.columns]
-        df['date'] = days_since_epoch(file_date.date())
+        df = pd.read_csv(file, sep=',', encoding='utf-8')
+        df['date'] = (file_date.date() - date(1970, 1, 1)).days
         all_data.append(df)
     
     if not all_data:
@@ -114,26 +99,27 @@ def process_clockify_data(tmp_dir):
 
 @functions_framework.http
 def main(request):
-    """HTTP Cloud Function.
-    Args:
-        request (flask.Request): The request object.
-    Returns:
-        The response text, or any set of values that can be turned into a
-        Response object using `make_response`
     """
+    Main entry point for the Cloud Function.
+    Args:
+        request: The request object from Cloud Functions
+    Returns:
+        str: Operation results or error message
+    """
+    start_time = datetime.now()
+    logging.info(f"Starting Clockify import job at {start_time}")
+    
     try:
-        # Check if this is a health check request
-        if request.method == 'GET':
-            return jsonify({'status': 'healthy'}), 200
-
         # Create temporary directory
         tmp_dir = tempfile.mkdtemp()
         
         # Process the data
         df = process_clockify_data(tmp_dir)
-        
         if df is None:
-            return jsonify({'error': 'No data processed'}), 400
+            return json.dumps({
+                'status': 'error',
+                'message': 'No data processed'
+            }), 400
         
         # Save to parquet
         parquet_file = os.path.join(tmp_dir, "combined_clockify_report.parquet")
@@ -147,6 +133,7 @@ def main(request):
         blob_name = f'clockify_data/{today}/combined_clockify_report.parquet'
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(parquet_file)
+        logging.info(f"Uploaded to GCS: {blob_name}")
         
         # Load to BigQuery
         client = bigquery.Client()
@@ -171,6 +158,7 @@ def main(request):
             uri, table_id, job_config=job_config
         )
         load_job.result()
+        logging.info("BigQuery load completed")
         
         # Convert date format
         query = f"""
@@ -188,9 +176,21 @@ def main(request):
         
         query_job = client.query(query)
         query_job.result()
+        logging.info("Date conversion completed")
         
-        return jsonify({'status': 'success', 'message': 'Data processing completed successfully'}), 200
+        end_time = datetime.now()
+        duration = end_time - start_time
+        logging.info(f"Import completed in {duration}")
+        
+        return json.dumps({
+            'status': 'success',
+            'message': f"Data processing completed successfully in {duration}",
+            'duration': str(duration)
+        })
         
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logging.error(f"Error: {str(e)}")
+        return json.dumps({
+            'status': 'error',
+            'message': str(e)
+        }), 500
