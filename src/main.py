@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timedelta, date
 import pandas as pd
 import tempfile
+import csv
+import re
 import requests
 
 # Set up logging
@@ -14,73 +16,82 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+def clean_column_name(name):
+    cleaned = re.sub(r'[^\w\s]', '', name)
+    cleaned = re.sub(r'\s+', '_', cleaned).lower()
+    return cleaned
+
+def detect_delimiter(file_path):
+    with open(file_path, 'r', newline='') as csvfile:
+        dialect = csv.Sniffer().sniff(csvfile.read(1024))
+        return dialect.delimiter
+
+def request_summary_report(start_date, end_date, output_dir):
+    """Request Clockify report for a date range and save to file"""
+    api_key = os.environ.get('CLOCKIFY_API_KEY')
+    workspace_id = os.environ.get('CLOCKIFY_WORKSPACE_ID')
+    base_url = f'https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/summary'
+    
+    payload = {
+        "amountShown": "EARNED",
+        "dateRangeStart": start_date.isoformat() + "Z",
+        "dateRangeEnd": end_date.isoformat() + "Z",
+        "dateRangeType": "ABSOLUTE",
+        "exportType": "CSV",
+        "summaryFilter": {
+            "groups": ["USER", "PROJECT"]
+        }
+    }
+    
+    headers = {
+        'X-Api-Key': api_key,
+        'Content-Type': 'application/json'
+    }
+    
+    response = requests.post(base_url, headers=headers, data=json.dumps(payload))
+    
+    if response.status_code == 200:
+        filename = f"clockify_summary_report_{start_date.strftime('%Y-%m-%d')}.csv"
+        filepath = os.path.join(output_dir, filename)
+        with open(filepath, "wb") as file:
+            file.write(response.content)
+        logging.info(f"Report downloaded successfully for {start_date.strftime('%Y-%m-%d')}")
+        return filepath
+    else:
+        logging.error(f"Failed to retrieve report: {response.status_code}, {response.text}")
+        return None
+
 def clockify_to_bigquery():
-    """
-    Core function to import data from Clockify to BigQuery via GCS
-    Returns:
-        str: Operation results
-    """
+    """Process Clockify data and upload to BigQuery"""
     try:
         logging.info("Starting clockify_to_bigquery function")
         
-        # Get configuration from environment variables
-        api_key = os.environ.get('CLOCKIFY_API_KEY')
-        workspace_id = os.environ.get('CLOCKIFY_WORKSPACE_ID')
+        # Get configuration
         project_id = os.environ.get('GCP_PROJECT_ID')
         bucket_name = os.environ.get('GCS_BUCKET_NAME')
 
-        if not all([api_key, workspace_id, project_id, bucket_name]):
+        if not all([project_id, bucket_name]):
             raise Exception("Missing required environment variables")
 
-        # Initialize clients
-        logging.info("Initializing clients")
-        bigquery_client = bigquery.Client(project=project_id)
-        storage_client = storage.Client(project=project_id)
+        # Create temporary directory
+        output_dir = tempfile.mkdtemp()
+        logging.info(f"Created temporary directory: {output_dir}")
         
-        # Process Clockify data
-        start_date = datetime(2024, 1, 1)
+        # Download CSV for yesterday
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        all_data = []
-        base_url = f'https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/summary'
+        start_date = end_date - timedelta(days=1)
         
-        current_date = start_date
-        while current_date < end_date:
-            next_day = current_date + timedelta(days=1)
+        csv_file = request_summary_report(start_date, end_date, output_dir)
+        if not csv_file:
+            raise Exception("Failed to download report")
             
-            payload = {
-                "amountShown": "EARNED",
-                "dateRangeStart": current_date.isoformat() + "Z",
-                "dateRangeEnd": next_day.isoformat() + "Z",
-                "dateRangeType": "ABSOLUTE",
-                "exportType": "CSV",
-                "summaryFilter": {
-                    "groups": ["USER", "PROJECT"]
-                }
-            }
-            
-            headers = {
-                'X-Api-Key': api_key,
-                'Content-Type': 'application/json'
-            }
-            
-            response = requests.post(base_url, headers=headers, data=json.dumps(payload))
-            
-            if response.status_code == 200:
-                df = pd.read_csv(pd.io.common.BytesIO(response.content))
-                df['date'] = current_date.date()
-                all_data.append(df)
-                logging.info(f"Retrieved data for {current_date.date()}")
-            else:
-                logging.error(f"Failed to retrieve data for {current_date.date()}: {response.status_code}")
-            
-            current_date = next_day
+        # Process CSV file
+        logging.info(f"Processing CSV file: {csv_file}")
+        delimiter = detect_delimiter(csv_file)
+        df = pd.read_csv(csv_file, sep=delimiter, encoding='utf-8')
         
-        if not all_data:
-            raise Exception("No data retrieved from Clockify")
-            
-        # Process the combined data
-        combined_df = pd.concat(all_data, ignore_index=True)
-        
+        # Clean and rename columns
+        df.columns = [clean_column_name(col) for col in df.columns]
         column_mapping = {
             'benutzer': 'user',
             'projekt': 'project',
@@ -89,25 +100,42 @@ def clockify_to_bigquery():
             'zeit_dezimal': 'time_decimal',
             'betrag_eur': 'amount_eur'
         }
-        combined_df.rename(columns=column_mapping, inplace=True)
         
-        combined_df['time_decimal'] = pd.to_numeric(combined_df['time_decimal'], errors='coerce')
-        combined_df['amount_eur'] = pd.to_numeric(combined_df['amount_eur'], errors='coerce')
+        logging.info(f"Original columns: {df.columns.tolist()}")
+        df.rename(columns=column_mapping, inplace=True)
+        logging.info(f"Renamed columns: {df.columns.tolist()}")
         
-        # Save to GCS
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        parquet_filename = f"clockify_data/{timestamp}/combined_clockify_report.parquet"
+        # Add date column
+        df['date'] = start_date.date()
         
-        with tempfile.NamedTemporaryFile() as tmp:
-            combined_df.to_parquet(tmp.name, index=False)
-            bucket = storage_client.bucket(bucket_name)
-            blob = bucket.blob(parquet_filename)
-            blob.upload_from_filename(tmp.name)
-            
-        gcs_uri = f"gs://{bucket_name}/{parquet_filename}"
-        logging.info(f"Uploaded data to {gcs_uri}")
+        # Convert numeric columns
+        for col in ['time_decimal', 'amount_eur']:
+            try:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                logging.info(f"Converted {col} to numeric")
+            except Exception as e:
+                logging.error(f"Error converting {col}: {str(e)}")
+                raise
+        
+        # Save to parquet
+        parquet_file = os.path.join(output_dir, "combined_clockify_report.parquet")
+        df.to_parquet(parquet_file, index=False)
+        logging.info(f"Saved to parquet: {parquet_file}")
+        
+        # Upload to GCS
+        storage_client = storage.Client(project=project_id)
+        bucket = storage_client.bucket(bucket_name)
+        
+        today = datetime.now().strftime('%Y-%m-%d')
+        blob_name = f'clockify_data/{today}/combined_clockify_report.parquet'
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(parquet_file)
+        
+        gcs_uri = f"gs://{bucket_name}/{blob_name}"
+        logging.info(f"Uploaded to GCS: {gcs_uri}")
         
         # Load to BigQuery
+        client = bigquery.Client(project=project_id)
         table_id = f'{project_id}.dl_clockify.summary_time_entry_report'
         
         job_config = bigquery.LoadJobConfig(
@@ -124,7 +152,7 @@ def clockify_to_bigquery():
             ]
         )
         
-        load_job = bigquery_client.load_table_from_uri(
+        load_job = client.load_table_from_uri(
             gcs_uri,
             table_id,
             job_config=job_config
@@ -133,7 +161,7 @@ def clockify_to_bigquery():
         load_job.result()
         logging.info("BigQuery load completed")
         
-        table = bigquery_client.get_table(table_id)
+        table = client.get_table(table_id)
         result = f"Loaded {table.num_rows} rows into {table_id}"
         logging.info(result)
         
@@ -144,13 +172,7 @@ def clockify_to_bigquery():
         raise e
 
 def main(request):
-    """
-    Main entry point for the Cloud Function.
-    Args:
-        request: The request object from Cloud Functions
-    Returns:
-        str: Operation results or error message
-    """
+    """Cloud Function entry point"""
     start_time = datetime.now()
     logging.info(f"Starting import job at {start_time}")
     
