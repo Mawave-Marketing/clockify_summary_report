@@ -173,7 +173,7 @@ def clockify_to_bigquery():
 
 def main(request):
     """Cloud Function entry point"""
-    start_time = datetime.now()
+    start_time = datetime(2024, 1, 1)
     logging.info(f"Starting import job at {start_time}")
     
     try:
