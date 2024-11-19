@@ -9,6 +9,7 @@ import tempfile
 import csv
 import re
 import requests
+import time
 
 # Set up logging
 logging.basicConfig(
@@ -77,21 +78,36 @@ def clockify_to_bigquery():
         output_dir = tempfile.mkdtemp()
         logging.info(f"Created temporary directory: {output_dir}")
         
-        # Download CSV for yesterday
+        # Set date range for full 2024
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = end_date - timedelta(days=1)
-        
-        csv_file = request_summary_report(start_date, end_date, output_dir)
-        if not csv_file:
-            raise Exception("Failed to download report")
+        start_date = datetime(2024, 1, 1)
+        all_data = []
+
+        # Download all data day by day
+        current_date = start_date
+        while current_date < end_date:
+            next_day = current_date + timedelta(days=1)
+            csv_file = request_summary_report(current_date, next_day, output_dir)
             
-        # Process CSV file
-        logging.info(f"Processing CSV file: {csv_file}")
-        delimiter = detect_delimiter(csv_file)
-        df = pd.read_csv(csv_file, sep=delimiter, encoding='utf-8')
+            if csv_file:
+                # Process CSV file
+                logging.info(f"Processing CSV file: {csv_file}")
+                delimiter = detect_delimiter(csv_file)
+                df = pd.read_csv(csv_file, sep=delimiter, encoding='utf-8')
+                df['date'] = current_date.date()
+                all_data.append(df)
+            
+            current_date = next_day
+            time.sleep(2)  # Rate limiting
+            
+        if not all_data:
+            raise Exception("No data collected")
+            
+        # Combine all data
+        combined_df = pd.concat(all_data, ignore_index=True)
         
         # Clean and rename columns
-        df.columns = [clean_column_name(col) for col in df.columns]
+        combined_df.columns = [clean_column_name(col) for col in combined_df.columns]
         column_mapping = {
             'benutzer': 'user',
             'projekt': 'project',
@@ -101,17 +117,14 @@ def clockify_to_bigquery():
             'betrag_eur': 'amount_eur'
         }
         
-        logging.info(f"Original columns: {df.columns.tolist()}")
-        df.rename(columns=column_mapping, inplace=True)
-        logging.info(f"Renamed columns: {df.columns.tolist()}")
-        
-        # Add date column
-        df['date'] = start_date.date()
+        logging.info(f"Original columns: {combined_df.columns.tolist()}")
+        combined_df.rename(columns=column_mapping, inplace=True)
+        logging.info(f"Renamed columns: {combined_df.columns.tolist()}")
         
         # Convert numeric columns
         for col in ['time_decimal', 'amount_eur']:
             try:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
                 logging.info(f"Converted {col} to numeric")
             except Exception as e:
                 logging.error(f"Error converting {col}: {str(e)}")
@@ -119,7 +132,7 @@ def clockify_to_bigquery():
         
         # Save to parquet
         parquet_file = os.path.join(output_dir, "combined_clockify_report.parquet")
-        df.to_parquet(parquet_file, index=False)
+        combined_df.to_parquet(parquet_file, index=False)
         logging.info(f"Saved to parquet: {parquet_file}")
         
         # Upload to GCS
@@ -173,7 +186,7 @@ def clockify_to_bigquery():
 
 def main(request):
     """Cloud Function entry point"""
-    start_time = datetime(2024, 1, 1)
+    start_time = datetime.now()
     logging.info(f"Starting import job at {start_time}")
     
     try:
