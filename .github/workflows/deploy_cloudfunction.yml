@@ -37,4 +37,4 @@ jobs:
         max_instance_request_concurrency: 1
         ingress_settings: 'ALLOW_ALL'
         service_account: '${{ secrets.RUNTIME_SERVICE_ACCOUNT_EMAIL }}'
-        service_timeout: '540s'  # Added 9-minute timeout since we're processing multiple days
+        service_timeout: '1500s'  # Added 9-minute timeout since we're processing multiple days
