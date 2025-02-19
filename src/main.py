@@ -79,9 +79,11 @@ def clockify_to_bigquery():
         output_dir = tempfile.mkdtemp()
         logging.info(f"Created temporary directory: {output_dir}")
         
-        # Set date range for full 2024
+        # Calculate date range for last 8 weeks
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = datetime(2024, 1, 1)
+        start_date = end_date - timedelta(weeks=8)
+        logging.info(f"Fetching data from {start_date} to {end_date}")
+        
         all_data = []
 
         # Download all data day by day
@@ -91,7 +93,6 @@ def clockify_to_bigquery():
             csv_file = request_summary_report(current_date, next_day, output_dir)
             
             if csv_file:
-                # Process CSV file
                 logging.info(f"Processing CSV file: {csv_file}")
                 delimiter = detect_delimiter(csv_file)
                 df = pd.read_csv(csv_file, sep=delimiter, encoding='utf-8')
@@ -148,10 +149,12 @@ def clockify_to_bigquery():
         gcs_uri = f"gs://{bucket_name}/{blob_name}"
         logging.info(f"Uploaded to GCS: {gcs_uri}")
         
-        # Load to BigQuery
+        # Load to BigQuery with merge operation
         client = bigquery.Client(project=project_id)
         table_id = f'{project_id}.dl_clockify.summary_time_entry_report'
+        temp_table_id = f'{project_id}.dl_clockify.temp_summary_time_entry_report'
         
+        # First load new data into a temporary table
         job_config = bigquery.LoadJobConfig(
             source_format=bigquery.SourceFormat.PARQUET,
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
@@ -168,15 +171,52 @@ def clockify_to_bigquery():
         
         load_job = client.load_table_from_uri(
             gcs_uri,
-            table_id,
+            temp_table_id,
             job_config=job_config
         )
-        
         load_job.result()
-        logging.info("BigQuery load completed")
+        logging.info("Loaded data into temporary table")
         
+        # Check if main table exists, if not create it
+        try:
+            client.get_table(table_id)
+        except Exception as e:
+            logging.info(f"Main table does not exist, creating it")
+            # Create the main table with the same schema
+            main_table = bigquery.Table(table_id, schema=job_config.schema)
+            client.create_table(main_table)
+        
+        # Perform merge operation
+        merge_query = f"""
+        MERGE `{table_id}` T
+        USING `{temp_table_id}` S
+        ON T.date = S.date 
+            AND T.user = S.user 
+            AND T.project = S.project
+        WHEN MATCHED THEN
+            UPDATE SET 
+                client = S.client,
+                time_hours = S.time_hours,
+                time_decimal = S.time_decimal,
+                amount_eur = S.amount_eur
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT (user, project, client, time_hours, time_decimal, amount_eur, date)
+            VALUES(user, project, client, time_hours, time_decimal, amount_eur, date)
+        WHEN NOT MATCHED BY SOURCE AND T.date BETWEEN '{start_date.date()}' AND '{end_date.date()}' THEN
+            DELETE
+        """
+        
+        merge_job = client.query(merge_query)
+        merge_job.result()
+        logging.info("Completed merge operation")
+        
+        # Clean up temporary table
+        client.delete_table(temp_table_id, not_found_ok=True)
+        logging.info("Cleaned up temporary table")
+        
+        # Get final row count
         table = client.get_table(table_id)
-        result = f"Loaded {table.num_rows} rows into {table_id}"
+        result = f"Updated data for date range {start_date.date()} to {end_date.date()}. Table now has {table.num_rows} total rows"
         logging.info(result)
         
         return result
