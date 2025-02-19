@@ -10,6 +10,7 @@ import csv
 import re
 import requests
 import time
+import base64
 
 # Set up logging
 logging.basicConfig(
@@ -98,7 +99,7 @@ def clockify_to_bigquery():
                 all_data.append(df)
             
             current_date = next_day
-            time.sleep(2)  # Rate limiting
+            time.sleep(1)  # Rate limiting
             
         if not all_data:
             raise Exception("No data collected")
@@ -184,8 +185,8 @@ def clockify_to_bigquery():
         logging.error(f"Error in clockify_to_bigquery: {str(e)}")
         raise e
 
-def main(request):
-    """Cloud Function entry point"""
+def main(event, context):
+    """Cloud Function Pub/Sub entry point"""
     start_time = datetime.now()
     logging.info(f"Starting import job at {start_time}")
     
@@ -195,15 +196,8 @@ def main(request):
         duration = end_time - start_time
         logging.info(f"Import completed in {duration}")
         
-        return json.dumps({
-            'status': 'success',
-            'message': results,
-            'duration': str(duration)
-        })
+        return 'Success'  # Simple success response for Pub/Sub
         
     except Exception as e:
         logging.error(f"Failed to import data: {str(e)}")
-        return json.dumps({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        raise  # Raise the exception to indicate failure to Pub/Sub

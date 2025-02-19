@@ -1,40 +1,46 @@
-name: deploy cloud function
+name: Deploy Cloud Function
 on: 
   push:
     branches:
       - main
+  workflow_dispatch:
+
 jobs:
   deploy:
     permissions:
       contents: 'read'
       id-token: 'write'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
     steps:
     - uses: 'actions/checkout@v4'
+    
     - id: 'auth'
       uses: 'google-github-actions/auth@v2'
       with:
-        credentials_json: '${{ secrets.DEPLOYER_SERVICE_ACCOUNT }}'
+        workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
-      timeout-minutes: 10
       with:
         name: 'clockify-to-bigquery'
         region: 'europe-west3'
         source_dir: './src/'
-        runtime: 'python310'
+        runtime: 'python312'
         entry_point: 'main'
-        cpu: 0.167
         memory: '512M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
           CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
           GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
           GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
-          GOOGLE_APPLICATION_CREDENTIALS_JSON=${{ secrets.RUNTIME_SERVICE_ACCOUNT }}
         max_instance_count: 1
         max_instance_request_concurrency: 1
         ingress_settings: 'ALLOW_ALL'
-        service_account: '${{ secrets.RUNTIME_SERVICE_ACCOUNT_EMAIL }}'
-        service_timeout: '1500s'  # Added 9-minute timeout since we're processing multiple days
+        timeout: '540s'
+        service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'  # Runtime service account
+        event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
+        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC }}
+        event_trigger_retry: false
