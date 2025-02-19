@@ -39,8 +39,8 @@ jobs:
         max_instance_count: 1
         max_instance_request_concurrency: 1
         ingress_settings: 'ALLOW_ALL'
-        timeout: '540s'
-        service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'  # Runtime service account
+        service_timeout: '540s' 
+        service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
         event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC }}
         event_trigger_retry: false
