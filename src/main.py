@@ -41,7 +41,13 @@ def request_summary_report(start_date, end_date, output_dir):
         "dateRangeType": "ABSOLUTE",
         "exportType": "CSV",
         "summaryFilter": {
-            "groups": ["USER", "PROJECT"]
+            "groups": ["USER", "PROJECT", "TAG"]  # Added TAG
+        },
+        "tags": {
+            "containedInTimeentry": "CONTAINS",
+            "contains": "CONTAINS",
+            "ids": [],
+            "status": "ACTIVE"
         }
     }
     
@@ -114,6 +120,7 @@ def clockify_to_bigquery():
             'benutzer': 'user',
             'projekt': 'project',
             'kunde': 'client',
+            'tag': 'tags',  # Map tag column to tags
             'zeit_h': 'time_hours',
             'zeit_dezimal': 'time_decimal',
             'betrag_eur': 'amount_eur'
@@ -162,6 +169,7 @@ def clockify_to_bigquery():
                 bigquery.SchemaField("user", "STRING"),
                 bigquery.SchemaField("project", "STRING"),
                 bigquery.SchemaField("client", "STRING"),
+                bigquery.SchemaField("tags", "STRING"),  # Added tags field
                 bigquery.SchemaField("time_hours", "STRING"),
                 bigquery.SchemaField("time_decimal", "FLOAT"),
                 bigquery.SchemaField("amount_eur", "FLOAT"),
@@ -193,6 +201,7 @@ def clockify_to_bigquery():
         ON T.date = S.date 
             AND T.user = S.user 
             AND T.project = S.project
+            AND IFNULL(T.tags, '') = IFNULL(S.tags, '')  # Added tags to the ON clause
         WHEN MATCHED THEN
             UPDATE SET 
                 client = S.client,
@@ -200,8 +209,8 @@ def clockify_to_bigquery():
                 time_decimal = S.time_decimal,
                 amount_eur = S.amount_eur
         WHEN NOT MATCHED BY TARGET THEN
-            INSERT (user, project, client, time_hours, time_decimal, amount_eur, date)
-            VALUES(user, project, client, time_hours, time_decimal, amount_eur, date)
+            INSERT (user, project, client, tags, time_hours, time_decimal, amount_eur, date)
+            VALUES(user, project, client, tags, time_hours, time_decimal, amount_eur, date)
         WHEN NOT MATCHED BY SOURCE AND T.date BETWEEN '{start_date.date()}' AND '{end_date.date()}' THEN
             DELETE
         """
