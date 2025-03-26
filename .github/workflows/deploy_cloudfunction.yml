@@ -19,31 +19,12 @@ on:
           - users
 
 jobs:
-  deploy-utils:
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' }}
-    steps:
-    - uses: 'actions/checkout@v4'
-    - name: Authenticate with GCP
-      uses: 'google-github-actions/auth@v2'
-      with:
-        workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-        service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
-    - name: Upload utils.py to GCS
-      run: |
-        gcloud storage cp src/utils.py gs://${{ secrets.GCS_BUCKET_NAME }}/clockify-functions/utils.py
-
   deploy-summary:
     permissions:
       contents: 'read'
       id-token: 'write'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: deploy-utils
     if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'summary' }}
     steps:
     - uses: 'actions/checkout@v4'
@@ -53,13 +34,19 @@ jobs:
       with:
         workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
         service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+    
+    - name: Prepare function directory
+      run: |
+        mkdir -p ./deploy/summary
+        cp ./src/utils.py ./deploy/summary/
+        cp ./src/summary/* ./deploy/summary/
 
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       with:
         name: 'clockify-summary-report'
         region: 'europe-west3'
-        source_dir: './src/'
+        source_dir: './deploy/summary/'
         runtime: 'python312'
         entry_point: 'main'
         memory: '512M'
@@ -83,7 +70,6 @@ jobs:
       id-token: 'write'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: deploy-utils
     if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'clients' }}
     steps:
     - uses: 'actions/checkout@v4'
@@ -93,13 +79,19 @@ jobs:
       with:
         workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
         service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+    
+    - name: Prepare function directory
+      run: |
+        mkdir -p ./deploy/clients
+        cp ./src/utils.py ./deploy/clients/
+        cp ./src/clients/* ./deploy/clients/
 
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       with:
         name: 'clockify-clients'
         region: 'europe-west3'
-        source_dir: './src/'
+        source_dir: './deploy/clients/'
         runtime: 'python312'
         entry_point: 'main'
         memory: '256M'
@@ -123,7 +115,6 @@ jobs:
       id-token: 'write'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: deploy-utils
     if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'projects' }}
     steps:
     - uses: 'actions/checkout@v4'
@@ -133,13 +124,19 @@ jobs:
       with:
         workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
         service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+    
+    - name: Prepare function directory
+      run: |
+        mkdir -p ./deploy/projects
+        cp ./src/utils.py ./deploy/projects/
+        cp ./src/projects/* ./deploy/projects/
 
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       with:
         name: 'clockify-projects'
         region: 'europe-west3'
-        source_dir: './src/'
+        source_dir: './deploy/projects/'
         runtime: 'python312'
         entry_point: 'main'
         memory: '256M'
@@ -163,7 +160,6 @@ jobs:
       id-token: 'write'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: deploy-utils
     if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'users' }}
     steps:
     - uses: 'actions/checkout@v4'
@@ -173,13 +169,19 @@ jobs:
       with:
         workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
         service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+    
+    - name: Prepare function directory
+      run: |
+        mkdir -p ./deploy/users
+        cp ./src/utils.py ./deploy/users/
+        cp ./src/users/* ./deploy/users/
 
     - id: 'deploy'
       uses: 'google-github-actions/deploy-cloud-functions@v3'
       with:
         name: 'clockify-users'
         region: 'europe-west3'
-        source_dir: './src/'
+        source_dir: './deploy/users/'
         runtime: 'python312'
         entry_point: 'main'
         memory: '256M'

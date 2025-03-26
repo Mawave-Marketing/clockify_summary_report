@@ -1,6 +1,5 @@
 import json
 from google.cloud import bigquery
-import os
 import logging
 from datetime import datetime
 import pandas as pd
@@ -9,6 +8,9 @@ import requests
 import base64
 
 # Import shared utilities
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import get_clockify_headers, upload_to_gcs, load_to_bigquery
 
 # Set up logging
