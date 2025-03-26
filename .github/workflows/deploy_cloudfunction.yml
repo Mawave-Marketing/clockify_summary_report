@@ -75,6 +75,47 @@ jobs:
         service_timeout: '540s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
+        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_SUMMARY }}
+        event_trigger_retry: false
+
+  deploy-clients:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: deploy-utils
+    if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'clients' }}
+    steps:
+    - uses: 'actions/checkout@v4'
+    
+    - id: 'auth'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
+
+    - id: 'deploy'
+      uses: 'google-github-actions/deploy-cloud-functions@v3'
+      with:
+        name: 'clockify-clients'
+        region: 'europe-west3'
+        source_dir: './src/'
+        runtime: 'python312'
+        entry_point: 'main'
+        main: 'main_clients.py'
+        memory: '256M'
+        environment_variables: |-
+          CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
+          CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
+          GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
+        max_instance_count: 1
+        max_instance_request_concurrency: 1
+        ingress_settings: 'ALLOW_ALL'
+        service_timeout: '300s'
+        service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
+        event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
         event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_CLIENTS }}
         event_trigger_retry: false
 
@@ -158,45 +199,4 @@ jobs:
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
         event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_USERS }}
-        event_trigger_retry: falsecloud.pubsub.topic.v1.messagePublished'
-        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_SUMMARY }}
         event_trigger_retry: false
-
-  deploy-clients:
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: deploy-utils
-    if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' || github.event.inputs.function == 'clients' }}
-    steps:
-    - uses: 'actions/checkout@v4'
-    
-    - id: 'auth'
-      uses: 'google-github-actions/auth@v2'
-      with:
-        workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-        service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
-
-    - id: 'deploy'
-      uses: 'google-github-actions/deploy-cloud-functions@v3'
-      with:
-        name: 'clockify-clients'
-        region: 'europe-west3'
-        source_dir: './src/'
-        runtime: 'python312'
-        entry_point: 'main'
-        main: 'main_clients.py'
-        memory: '256M'
-        environment_variables: |-
-          CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
-          CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
-          GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
-          GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
-        max_instance_count: 1
-        max_instance_request_concurrency: 1
-        ingress_settings: 'ALLOW_ALL'
-        service_timeout: '300s'
-        service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
-        event_trigger_type: 'google.
