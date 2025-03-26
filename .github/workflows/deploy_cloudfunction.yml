@@ -74,7 +74,7 @@ jobs:
         service_timeout: '540s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-summary-report'
+        event_trigger_pubsub_topic: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-summary-report'
         event_trigger_retry: false
 
   deploy-clients:
@@ -114,7 +114,7 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-clients'
+        event_trigger_pubsub_topic: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-clients'
         event_trigger_retry: false
 
   deploy-projects:
@@ -154,7 +154,7 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-projects'
+        event_trigger_pubsub_topic: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-projects'
         event_trigger_retry: false
 
   deploy-users:
@@ -194,5 +194,5 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-users'
+        event_trigger_pubsub_topic: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-users'
         event_trigger_retry: false
