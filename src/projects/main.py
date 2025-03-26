@@ -6,10 +6,10 @@ import pandas as pd
 import time
 import requests
 import base64
+import os
 
 # Import shared utilities
 import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import get_clockify_headers, upload_to_gcs, load_to_bigquery
 
@@ -49,20 +49,51 @@ def fetch_clockify_projects():
     
     # Convert to DataFrame
     if all_projects:
-        df = pd.DataFrame(all_projects)
-        # Handle nested objects like memberships, estimate, timeEstimate, etc.
-        for col in df.columns:
-            if df[col].apply(lambda x: isinstance(x, dict)).any():
-                # Extract nested fields and create new columns
-                nested_df = pd.json_normalize(df[col])
-                nested_df.columns = [f"{col}_{subcol}" for subcol in nested_df.columns]
-                for nested_col in nested_df.columns:
-                    df[nested_col] = nested_df[nested_col]
-                # Drop the original nested column
-                df = df.drop(columns=[col])
+        # Process projects to extract nested fields
+        processed_projects = []
+        
+        for project in all_projects:
+            # Handle nested fields
+            processed_project = project.copy()
+            
+            # Extract hourlyRate fields
+            if 'hourlyRate' in processed_project and isinstance(processed_project['hourlyRate'], dict):
+                for key, value in processed_project['hourlyRate'].items():
+                    processed_project[f'hourlyRate_{key}'] = value
+            
+            # Extract estimate fields
+            if 'estimate' in processed_project and isinstance(processed_project['estimate'], dict):
+                for key, value in processed_project['estimate'].items():
+                    processed_project[f'estimate_{key}'] = value
+            
+            # Extract timeEstimate fields
+            if 'timeEstimate' in processed_project and isinstance(processed_project['timeEstimate'], dict):
+                for key, value in processed_project['timeEstimate'].items():
+                    processed_project[f'timeEstimate_{key}'] = value
+            
+            # Extract memberships data - handle separately to avoid duplications
+            if 'memberships' in processed_project:
+                memberships = processed_project.pop('memberships', [])
+                for i, membership in enumerate(memberships):
+                    # For the first membership, add the fields directly to the project
+                    if i == 0:
+                        for key, value in membership.items():
+                            # Skip nested objects in memberships
+                            if not isinstance(value, dict) and not isinstance(value, list):
+                                processed_project[key] = value
+                            # Handle nested costRate and hourlyRate in memberships
+                            elif isinstance(value, dict):
+                                for subkey, subvalue in value.items():
+                                    processed_project[f'{key}_{subkey}'] = subvalue
+            
+            processed_projects.append(processed_project)
+        
+        # Convert processed projects to DataFrame
+        df = pd.DataFrame(processed_projects)
         
         # Add timestamp
         df['import_timestamp'] = datetime.now()
+        logging.info(f"Processed {len(df)} projects with columns: {df.columns.tolist()}")
         return df
     else:
         return pd.DataFrame()
@@ -94,23 +125,37 @@ def process_projects():
             project_id
         )
         
-        # Define schema for BigQuery based on the actual columns in the DataFrame
+        # Define schema for BigQuery based on the parquet file structure
         schema = [
             bigquery.SchemaField("id", "STRING"),
             bigquery.SchemaField("name", "STRING"),
-            bigquery.SchemaField("workspaceId", "STRING"),
             bigquery.SchemaField("clientId", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("archived", "BOOLEAN"),
+            bigquery.SchemaField("workspaceId", "STRING"),
             bigquery.SchemaField("billable", "BOOLEAN"),
-            bigquery.SchemaField("public", "BOOLEAN"),
+            bigquery.SchemaField("costRate", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("hourlyRate", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("membershipStatus", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("membershipType", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("targetId", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("userId", "STRING", mode="NULLABLE"),
             bigquery.SchemaField("color", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("archived", "BOOLEAN"),
+            bigquery.SchemaField("duration", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("clientName", "STRING", mode="NULLABLE"),
             bigquery.SchemaField("note", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("hourlyRate_amount", "FLOAT", mode="NULLABLE"),
+            bigquery.SchemaField("budgetEstimate", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("estimateReset", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("template", "BOOLEAN"),
+            bigquery.SchemaField("public", "BOOLEAN"),
+            bigquery.SchemaField("hourlyRate_amount", "INTEGER", mode="NULLABLE"),
             bigquery.SchemaField("hourlyRate_currency", "STRING", mode="NULLABLE"),
             bigquery.SchemaField("estimate_estimate", "STRING", mode="NULLABLE"),
             bigquery.SchemaField("estimate_type", "STRING", mode="NULLABLE"),
-            bigquery.SchemaField("timeEstimate_estimate", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("timeEstimate_estimate", "STRING", mode="NULLABLE"), # Changed from INTEGER to STRING based on parquet schema
             bigquery.SchemaField("timeEstimate_type", "STRING", mode="NULLABLE"),
+            bigquery.SchemaField("timeEstimate_resetOption", "INTEGER", mode="NULLABLE"),
+            bigquery.SchemaField("timeEstimate_active", "BOOLEAN", mode="NULLABLE"),
+            bigquery.SchemaField("timeEstimate_includeNonBillable", "BOOLEAN", mode="NULLABLE"),
             bigquery.SchemaField("import_timestamp", "TIMESTAMP"),
         ]
         
