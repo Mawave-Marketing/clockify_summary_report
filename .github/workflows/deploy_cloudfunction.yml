@@ -94,7 +94,7 @@ jobs:
         source_dir: './deploy/clients/'
         runtime: 'python312'
         entry_point: 'main'
-        memory: '256M'
+        memory: '512M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
           CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
@@ -139,7 +139,7 @@ jobs:
         source_dir: './deploy/projects/'
         runtime: 'python312'
         entry_point: 'main'
-        memory: '256M'
+        memory: '512M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
           CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
@@ -184,7 +184,7 @@ jobs:
         source_dir: './deploy/users/'
         runtime: 'python312'
         entry_point: 'main'
-        memory: '256M'
+        memory: '512M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
           CLOCKIFY_WORKSPACE_ID=${{ secrets.CLOCKIFY_WORKSPACE_ID }}
