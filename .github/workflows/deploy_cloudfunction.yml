@@ -28,14 +28,14 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.function == 'all' }}
     steps:
     - uses: 'actions/checkout@v4'
-    - name: Create utils directory in GCS
+    - name: Authenticate with GCP
       uses: 'google-github-actions/auth@v2'
       with:
         workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
         service_account: 'github-cloud-function-deployer@circular-ether-368213.iam.gserviceaccount.com'
     - name: Upload utils.py to GCS
       run: |
-        gcloud storage cp src/utils.py gs://${{ secrets.GCS_SOURCE_BUCKET }}/clockify-functions/utils.py
+        gcloud storage cp src/utils.py gs://${{ secrets.GCS_BUCKET_NAME }}/clockify-functions/utils.py
 
   deploy-summary:
     permissions:
@@ -62,7 +62,6 @@ jobs:
         source_dir: './src/'
         runtime: 'python312'
         entry_point: 'main'
-        main: 'main_summary.py'
         memory: '512M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
@@ -75,7 +74,7 @@ jobs:
         service_timeout: '540s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_SUMMARY }}
+        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-summary-report'
         event_trigger_retry: false
 
   deploy-clients:
@@ -103,7 +102,6 @@ jobs:
         source_dir: './src/'
         runtime: 'python312'
         entry_point: 'main'
-        main: 'main_clients.py'
         memory: '256M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
@@ -116,7 +114,7 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_CLIENTS }}
+        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-clients'
         event_trigger_retry: false
 
   deploy-projects:
@@ -144,7 +142,6 @@ jobs:
         source_dir: './src/'
         runtime: 'python312'
         entry_point: 'main'
-        main: 'main_projects.py'
         memory: '256M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
@@ -157,7 +154,7 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_PROJECTS }}
+        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-projects'
         event_trigger_retry: false
 
   deploy-users:
@@ -185,7 +182,6 @@ jobs:
         source_dir: './src/'
         runtime: 'python312'
         entry_point: 'main'
-        main: 'main_users.py'
         memory: '256M'
         environment_variables: |-
           CLOCKIFY_API_KEY=${{ secrets.CLOCKIFY_API_KEY }}
@@ -198,5 +194,5 @@ jobs:
         service_timeout: '300s'
         service_account: 'clockify-bigquery-sa@circular-ether-368213.iam.gserviceaccount.com'
         event_trigger_type: 'google.cloud.pubsub.topic.v1.messagePublished'
-        event_trigger_pubsub_topic: ${{ secrets.PUBSUB_TOPIC_USERS }}
+        event_trigger_resource: 'projects/${{ secrets.GCP_PROJECT_ID }}/topics/clockify-users'
         event_trigger_retry: false
