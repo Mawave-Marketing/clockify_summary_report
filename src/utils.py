@@ -38,28 +38,42 @@ def get_clockify_headers():
     }
 
 def upload_to_gcs(df, filename, bucket_name, project_id, folder='clockify_data'):
-    """Upload a DataFrame to Google Cloud Storage"""
+    """Upload a DataFrame to Google Cloud Storage with retry logic"""
     storage_client = storage.Client(project=project_id)
     bucket = storage_client.bucket(bucket_name)
-    
+
     # Create temporary directory
     output_dir = tempfile.mkdtemp()
     parquet_file = os.path.join(output_dir, filename)
-    
+
     # Save to parquet
     df.to_parquet(parquet_file, index=False)
     logging.info(f"Saved to parquet: {parquet_file}")
-    
-    # Upload to GCS
+
+    # Upload to GCS with retry logic
     today = datetime.now().strftime('%Y-%m-%d')
     blob_name = f'{folder}/{today}/{filename}'
     blob = bucket.blob(blob_name)
-    blob.upload_from_filename(parquet_file)
-    
-    gcs_uri = f"gs://{bucket_name}/{blob_name}"
-    logging.info(f"Uploaded to GCS: {gcs_uri}")
-    
-    return gcs_uri
+
+    # Retry configuration
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            blob.upload_from_filename(parquet_file)
+            gcs_uri = f"gs://{bucket_name}/{blob_name}"
+            logging.info(f"Uploaded to GCS: {gcs_uri}")
+            return gcs_uri
+        except Exception as e:
+            error_msg = str(e)
+            if attempt < max_retries - 1 and ('SSL' in error_msg or 'Connection' in error_msg):
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logging.warning(f"Upload attempt {attempt + 1} failed with {type(e).__name__}: {error_msg}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                logging.error(f"Upload failed after {attempt + 1} attempts: {error_msg}")
+                raise
 
 def load_to_bigquery(gcs_uri, table_id, temp_table_id, schema, project_id, merge_keys):
     """Load data from GCS to BigQuery and merge with existing data"""
