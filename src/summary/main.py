@@ -130,11 +130,55 @@ def request_summary_report(start_date, end_date, output_dir):
         logging.error(f"Failed to retrieve report: {response.status_code}, {response.text}")
         return None
 
+def process_batch(batch_data, batch_number, project_id, bucket_name):
+    """Process and upload a batch of data to BigQuery"""
+    if not batch_data:
+        logging.info(f"Batch {batch_number}: No data to process")
+        return 0
+
+    # Create DataFrame from records
+    batch_df = pd.DataFrame(batch_data)
+
+    # Ensure numeric columns are proper type
+    for col in ['time_decimal', 'amount_eur', 'duration_ms']:
+        if col in batch_df.columns:
+            batch_df[col] = pd.to_numeric(batch_df[col], errors='coerce')
+
+    # Upload to GCS with batch number in filename
+    filename = f"clockify_summary_batch_{batch_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+    gcs_uri = upload_to_gcs(batch_df, filename, bucket_name, project_id)
+
+    # Define schema for BigQuery
+    schema = [
+        bigquery.SchemaField("user_id", "STRING"),
+        bigquery.SchemaField("user", "STRING"),
+        bigquery.SchemaField("project_id", "STRING"),
+        bigquery.SchemaField("project", "STRING"),
+        bigquery.SchemaField("client_id", "STRING"),
+        bigquery.SchemaField("client", "STRING"),
+        bigquery.SchemaField("tag_id", "STRING"),
+        bigquery.SchemaField("tags", "STRING"),
+        bigquery.SchemaField("duration_ms", "INTEGER"),
+        bigquery.SchemaField("time_decimal", "FLOAT"),
+        bigquery.SchemaField("amount_eur", "FLOAT"),
+        bigquery.SchemaField("date", "DATE"),
+    ]
+
+    # Load to BigQuery
+    table_id = f'{project_id}.dl_clockify.summary_time_entry_report'
+    temp_table_id = f'{project_id}.dl_clockify.temp_summary_time_entry_report_{batch_number}'
+    merge_keys = ['date', 'user_id', 'project_id', 'tag_id']
+
+    num_rows = load_to_bigquery(gcs_uri, table_id, temp_table_id, schema, project_id, merge_keys)
+
+    logging.info(f"Batch {batch_number}: Processed {len(batch_df)} records. Table now has {num_rows} total rows")
+    return len(batch_df)
+
 def process_summary_report():
-    """Process Clockify summary report data and upload to BigQuery"""
+    """Process Clockify summary report data and upload to BigQuery in batches"""
     try:
         logging.info("Starting summary report processing")
-        
+
         # Get configuration
         project_id = os.environ.get('GCP_PROJECT_ID')
         bucket_name = os.environ.get('GCS_BUCKET_NAME')
@@ -145,15 +189,20 @@ def process_summary_report():
         # Create temporary directory
         output_dir = tempfile.mkdtemp()
         logging.info(f"Created temporary directory: {output_dir}")
-        
-        # Calculate date range for last week (testing with 1 week before scaling to 52)
-        end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = end_date - timedelta(weeks=1)
-        logging.info(f"Fetching data from {start_date} to {end_date}")
-        
-        all_data = []
 
-        # Download all data day by day
+        # Calculate date range - can now safely use 52 weeks with batch processing
+        end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = end_date - timedelta(weeks=52)
+        logging.info(f"Fetching data from {start_date} to {end_date}")
+
+        # Batch configuration
+        BATCH_SIZE_WEEKS = 4  # Process 4 weeks at a time
+        batch_data = []
+        batch_number = 1
+        total_records = 0
+        batch_start_date = start_date
+
+        # Download and process data day by day, uploading in batches
         current_date = start_date
         while current_date < end_date:
             next_day = current_date + timedelta(days=1)
@@ -167,63 +216,31 @@ def process_summary_report():
                 # Parse JSON and flatten the nested structure
                 records = parse_summary_json(data, current_date.date())
                 if records:
-                    all_data.extend(records)
+                    batch_data.extend(records)
 
             current_date = next_day
             time.sleep(1)  # Rate limiting
-            
-        if not all_data:
-            raise Exception("No data collected")
 
-        # Create DataFrame from records
-        combined_df = pd.DataFrame(all_data)
+            # Check if we've completed a batch (every BATCH_SIZE_WEEKS weeks)
+            weeks_processed = (current_date - batch_start_date).days / 7
+            if weeks_processed >= BATCH_SIZE_WEEKS or current_date >= end_date:
+                # Process and upload this batch
+                records_processed = process_batch(batch_data, batch_number, project_id, bucket_name)
+                total_records += records_processed
 
-        # Ensure numeric columns are proper type
-        for col in ['time_decimal', 'amount_eur', 'duration_ms']:
-            if col in combined_df.columns:
-                combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-        
-        # Upload to GCS
-        gcs_uri = upload_to_gcs(
-            combined_df, 
-            "combined_clockify_report.parquet", 
-            bucket_name, 
-            project_id
-        )
-        
-        # Define schema for BigQuery
-        schema = [
-            bigquery.SchemaField("user_id", "STRING"),
-            bigquery.SchemaField("user", "STRING"),
-            bigquery.SchemaField("project_id", "STRING"),
-            bigquery.SchemaField("project", "STRING"),
-            bigquery.SchemaField("client_id", "STRING"),
-            bigquery.SchemaField("client", "STRING"),
-            bigquery.SchemaField("tag_id", "STRING"),
-            bigquery.SchemaField("tags", "STRING"),
-            bigquery.SchemaField("duration_ms", "INTEGER"),
-            bigquery.SchemaField("time_decimal", "FLOAT"),
-            bigquery.SchemaField("amount_eur", "FLOAT"),
-            bigquery.SchemaField("date", "DATE"),
-        ]
+                # Reset for next batch
+                batch_data = []
+                batch_number += 1
+                batch_start_date = current_date
 
-        # Load to BigQuery
-        table_id = f'{project_id}.dl_clockify.summary_time_entry_report'
-        temp_table_id = f'{project_id}.dl_clockify.temp_summary_time_entry_report'
-        merge_keys = ['date', 'user_id', 'project_id', 'tag_id']
-        
-        num_rows = load_to_bigquery(
-            gcs_uri,
-            table_id,
-            temp_table_id,
-            schema,
-            project_id,
-            merge_keys
-        )
-        
-        result = f"Updated summary report data for date range {start_date.date()} to {end_date.date()}. Table now has {num_rows} total rows"
+        # Process any remaining data in the final batch
+        if batch_data:
+            records_processed = process_batch(batch_data, batch_number, project_id, bucket_name)
+            total_records += records_processed
+
+        result = f"Updated summary report data for date range {start_date.date()} to {end_date.date()}. Processed {total_records} total records in {batch_number} batches"
         logging.info(result)
-        
+
         return result
         
     except Exception as e:
