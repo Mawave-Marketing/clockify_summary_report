@@ -146,9 +146,9 @@ def process_summary_report():
         output_dir = tempfile.mkdtemp()
         logging.info(f"Created temporary directory: {output_dir}")
         
-        # Calculate date range for last 8 weeks
+        # Calculate date range for last week (testing with 1 week before scaling to 52)
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = end_date - timedelta(weeks=52)
+        start_date = end_date - timedelta(weeks=1)
         logging.info(f"Fetching data from {start_date} to {end_date}")
         
         all_data = []
