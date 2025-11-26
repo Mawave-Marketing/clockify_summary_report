@@ -167,7 +167,7 @@ def process_batch(batch_data, batch_number, project_id, bucket_name):
     # Load to BigQuery
     table_id = f'{project_id}.dl_clockify.summary_time_entry_report'
     temp_table_id = f'{project_id}.dl_clockify.temp_summary_time_entry_report_{batch_number}'
-    merge_keys = ['date', 'user_id', 'project_id', 'tag_id']
+    merge_keys = ['user_id', 'project_id', 'client', 'tags', 'date']
 
     num_rows = load_to_bigquery(gcs_uri, table_id, temp_table_id, schema, project_id, merge_keys)
 
