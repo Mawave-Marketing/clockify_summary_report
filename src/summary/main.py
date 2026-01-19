@@ -192,7 +192,7 @@ def process_summary_report():
 
         # Calculate date range - can now safely use 52 weeks with batch processing
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = end_date - timedelta(weeks=12)
+        start_date = end_date - timedelta(weeks=26)
         logging.info(f"Fetching data from {start_date} to {end_date}")
 
         # Batch configuration
